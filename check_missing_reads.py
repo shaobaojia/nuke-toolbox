@@ -3,12 +3,13 @@ try:
     from PySide6 import QtWidgets, QtCore, QtGui
 except ImportError:
     from PySide2 import QtWidgets, QtCore, QtGui
+import shutil
 
 
-class MissingReadsTable(QtWidgets.QDialog):
+class ReadManagerTable(QtWidgets.QDialog):
     def __init__(self, reads, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Check Missing Reads")
+        self.setWindowTitle("Read 管理器")
         self.setMinimumSize(860, 400)
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
 
@@ -42,13 +43,17 @@ class MissingReadsTable(QtWidgets.QDialog):
         self.copy_all = QtWidgets.QPushButton("Copy All Errors")
         self.copy_sel = QtWidgets.QPushButton("Copy Selected")
         self.select_btn = QtWidgets.QPushButton("Select in Node Graph")
-        self.refresh_btn = QtWidgets.QPushButton("Refresh")
+        self.collect_btn = QtWidgets.QPushButton("Collect to...")
+        self.refresh_btn = QtWidgets.QPushButton("Refresh Data")
+        self.reload_btn = QtWidgets.QPushButton("Reload UI")
 
         btn.addWidget(self.copy_all)
         btn.addWidget(self.copy_sel)
         btn.addWidget(self.select_btn)
+        btn.addWidget(self.collect_btn)
         btn.addStretch()
         btn.addWidget(self.refresh_btn)
+        btn.addWidget(self.reload_btn)
         layout.addLayout(btn)
 
         # --- Connections ---
@@ -56,6 +61,8 @@ class MissingReadsTable(QtWidgets.QDialog):
         self.copy_sel.clicked.connect(self._copy_selected)
         self.select_btn.clicked.connect(self._select_in_graph)
         self.refresh_btn.clicked.connect(self._refresh)
+        self.collect_btn.clicked.connect(self._collect)
+        self.reload_btn.clicked.connect(self._reload)
         self.table.doubleClicked.connect(self._select_in_graph)
 
     def _populate(self):
@@ -106,6 +113,83 @@ class MissingReadsTable(QtWidgets.QDialog):
             QtWidgets.QApplication.clipboard().setText("\n".join(lines))
             nuke.display(f"Copied {len(lines)} paths to clipboard")
 
+
+    def _collect(self):
+        rows = self._selected_rows()
+        if not rows:
+            nuke.message("Please select at least one row")
+            return
+
+        # Filter: only OK rows, reject if any ERROR selected
+        to_copy = []
+        for row in rows:
+            status = self.table.item(row, 1).text()
+            if status == "ERROR":
+                name = self.table.item(row, 0).text()
+                nuke.message("Cannot collect: \"" + name + "\" is missing.\nDeselect error rows first.")
+                return
+            to_copy.append(row)
+
+        if not to_copy:
+            return
+
+        # Ask for target directory
+        dest_dir = nuke.getFilename("Choose target directory")
+        if not dest_dir:
+            return
+        if not os.path.isdir(dest_dir):
+            try:
+                os.makedirs(dest_dir)
+            except Exception as e:
+                nuke.message("Cannot create directory:\n" + str(e))
+                return
+
+        # Check for filename collisions
+        seen = {}
+        collisions = []
+        entries = []
+        for row in to_copy:
+            src = self.table.item(row, 2).text()
+            fname = os.path.basename(src)
+            if fname in seen:
+                collisions.append(fname + "\n  " + seen[fname] + "\n  " + src)
+            else:
+                seen[fname] = src
+                entries.append((row, src, os.path.join(dest_dir, fname)))
+
+        if collisions:
+            nuke.message("Filename conflict detected. Aborted.\n\n" + "\n\n".join(collisions[:5]) + ("\n\n...and more" if len(collisions) > 5 else ""))
+            return
+
+        # Copy files and update Read nodes
+        copied = 0
+        errors = []
+        for row, src, dst in entries:
+            try:
+                shutil.copy2(src, dst)
+                name = self.table.item(row, 0).text()
+                node = nuke.toNode(name)
+                if node:
+                    node["file"].setValue(dst.replace("\\", "/"))
+                copied += 1
+            except Exception as e:
+                errors.append(os.path.basename(src) + ": " + str(e))
+
+        msg = "Collected " + str(copied) + " file(s) to " + dest_dir
+        if errors:
+            msg += "\n\nErrors:\n" + "\n".join(errors)
+        nuke.message(msg)
+        self._refresh()
+    
+
+
+    def _reload(self):
+        import importlib
+        importlib.reload(__import__("check_missing_reads"))
+        self.close()
+        check_missing_reads()
+    
+
     def _select_in_graph(self):
         rows = self._selected_rows()
         if not rows:
@@ -145,5 +229,5 @@ def check_missing_reads():
         path = node.knob("file").value()
         reads.append((name, has_error, path))
 
-    _panel = MissingReadsTable(reads)
+    _panel = ReadManagerTable(reads)
     _panel.show()

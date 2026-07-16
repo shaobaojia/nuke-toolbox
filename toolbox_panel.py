@@ -8,6 +8,7 @@ TOOLBOX = os.path.join(BASE, 'toolbox')
 TOOLS = {
     "Path Tools": [
         ("sel_reads", "\u9009\u62e9\u6240\u6709Read\u8282\u70b9", "\u4e00\u952e\u9009\u4e2d\u5f53\u524d\u5de5\u7a0b\u4e2d\u6240\u6709Read\u8282\u70b9"),
+        ("sel_writes", "\u9009\u62e9\u6240\u6709Write\u8282\u70b9", "\u4e00\u952e\u9009\u4e2d\u5f53\u524d\u5de5\u7a0b\u4e2d\u6240\u6709Write\u8282\u70b9"),
         ("convert_paths_to_relative", "\u8def\u5f84\u8f6c\u76f8\u5bf9", "\u5c06Read\u8282\u70b9\u8def\u5f84\u8f6c\u4e3a\u76f8\u5bf9\u8def\u5f84"),
     ],
     "Write Tools": [
@@ -27,10 +28,11 @@ STAMP_ACTIONS = {
     "stamp_off":     lambda ns: [n["postage_stamp"].setValue(False) for n in ns if "postage_stamp" in n.knobs()],
     "stamp_off_all": lambda _:  [n["postage_stamp"].setValue(False) for n in nuke.allNodes() if "postage_stamp" in n.knobs()],
     "sel_reads": lambda _: [n.setSelected(True) for n in nuke.allNodes() if n.Class() == "Read"],
+    "sel_writes": lambda _: [n.setSelected(True) for n in nuke.allNodes() if n.Class() == "Write"],
 }
 
 # Pairs of tools to put side-by-side: (group_name, [tool1, tool2])
-SIDE_BY_SIDE = {("Stamp Tools", "stamp_on", "stamp_off"), ("Write Tools", "write_reading_color", "write_reading_label")}
+SIDE_BY_SIDE = {("Stamp Tools", "stamp_on", "stamp_off"), ("Write Tools", "write_reading_color", "write_reading_label"), ("Path Tools", "sel_reads", "sel_writes")}
 
 STYLE = """
 QWidget { background: #1e1e1e; color: #d4d4d4; font-size: 12px; }
