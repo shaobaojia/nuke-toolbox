@@ -56,6 +56,10 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.replace_btn.setFixedWidth(90)
         self.replace_btn.clicked.connect(self._replace_path)
         rl.addWidget(self.replace_btn)
+        self.rel_btn = QtWidgets.QPushButton("Rel")
+        self.rel_btn.setFixedWidth(36)
+        self.rel_btn.clicked.connect(self._to_relative)
+        rl.addWidget(self.rel_btn)
         layout.addWidget(rw)
 
         # Buttons
@@ -133,7 +137,38 @@ class ReadManagerTable(QtWidgets.QDialog):
         self._populate()
         ec = sum(1 for _, e, _ in self.reads if e)
         self.stats.setText("Total: " + str(len(self.reads)) + " Read nodes  |  Errors: " + str(ec))
-        nuke.display("Refreshed: " + str(len(self.reads)) + " Read nodes, " + str(ec) + " errors", None, "Read Manager")
+        nuke.tprint("Refreshed: " + str(len(self.reads)) + " Read nodes, " + str(ec) + " errors")
+
+    def _to_relative(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
+        script_dir = nuke.script_directory()
+        if not script_dir:
+            QtWidgets.QMessageBox.warning(self, "Read Manager", "Save the Nuke script first")
+            return
+        count = 0
+        skipped = 0
+        for row in rows:
+            name = self.table.item(row, 0).text()
+            node = nuke.toNode(name)
+            if not node: continue
+            p = node.knob("file").value()
+            if p and os.path.isabs(p):
+                try:
+                    rel = os.path.relpath(p, script_dir).replace("\\", "/")
+                    node["file"].setValue(rel)
+                    self.table.item(row, 2).setText(rel)
+                    count += 1
+                except ValueError:
+                    skipped += 1
+                except: pass
+        msg = "Converted " + str(count) + " to relative"
+        if skipped:
+            msg += " | " + str(skipped) + " skipped (different drive)"
+        QtWidgets.QMessageBox.information(self, "Read Manager", msg)
+        self._refresh()
 
     def _reload(self):
         import importlib
@@ -185,11 +220,10 @@ class ReadManagerTable(QtWidgets.QDialog):
             op = self.table.item(row, 2).text().replace("\\", "/")
             if not op.startswith(sp): continue
             np = dp + op[len(sp):]
-            fn = os.path.basename(np)
-            if fn in seen:
-                QtWidgets.QMessageBox.warning(self, "Read Manager", "Filename conflict: " + fn)
+            if np in seen:
+                QtWidgets.QMessageBox.warning(self, "Read Manager", "Destination conflict: " + np)
                 return
-            seen[fn] = op
+            seen[np] = op
             entries.append((row, op, np))
 
         count = 0
@@ -214,3 +248,14 @@ class ReadManagerTable(QtWidgets.QDialog):
         QtWidgets.QMessageBox.information(self, "Read Manager", msg)
         self._refresh()
 
+
+
+_panel = None
+
+def check_missing_reads():
+    global _panel
+    reads = []
+    for node in nuke.allNodes("Read"):
+        reads.append((node.name(), node.hasError(), node.knob("file").value()))
+    _panel = ReadManagerTable(reads)
+    _panel.show()
