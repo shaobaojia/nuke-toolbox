@@ -9,7 +9,7 @@ import shutil
 class ReadManagerTable(QtWidgets.QDialog):
     def __init__(self, reads, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Read 管理器")
+        self.setWindowTitle("Read Read Manager")
         self.setMinimumSize(860, 400)
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
 
@@ -36,7 +36,35 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.stats = QtWidgets.QLabel(
             f"Total: {len(reads)} Read nodes  |  Errors: {error_count}"
         )
-        layout.addWidget(self.stats)
+                layout.addWidget(self.stats)
+
+        # --- Path Replace ---
+        replace_w = QtWidgets.QWidget()
+        replace_layout = QtWidgets.QHBoxLayout(replace_w)
+        replace_layout.setContentsMargins(0, 0, 0, 0)
+        replace_layout.setSpacing(4)
+
+        replace_layout.addWidget(QtWidgets.QLabel("Source:"))
+        self.src_path = QtWidgets.QLineEdit()
+        self.src_path.setPlaceholderText("path prefix to replace")
+        replace_layout.addWidget(self.src_path)
+
+        self.pick_btn = QtWidgets.QPushButton("Pick")
+        self.pick_btn.setFixedWidth(48)
+        self.pick_btn.clicked.connect(self._pick_path)
+        replace_layout.addWidget(self.pick_btn)
+
+        replace_layout.addWidget(QtWidgets.QLabel("Target:"))
+        self.dst_path = QtWidgets.QLineEdit()
+        self.dst_path.setPlaceholderText("replacement path")
+        replace_layout.addWidget(self.dst_path)
+
+        self.replace_btn = QtWidgets.QPushButton("Replace")
+        self.replace_btn.setFixedWidth(64)
+        self.replace_btn.clicked.connect(self._replace_path)
+        replace_layout.addWidget(self.replace_btn)
+
+        layout.addWidget(replace_w)
 
         # --- Buttons ---
         btn = QtWidgets.QHBoxLayout()
@@ -115,36 +143,40 @@ class ReadManagerTable(QtWidgets.QDialog):
 
 
     def _collect(self):
+        try:
+            self.__collect()
+        except Exception as e:
+            import traceback
+            QtWidgets.QMessageBox.critical(self, "Read Read Manager", traceback.format_exc())
+
+    def __collect(self):
         rows = self._selected_rows()
         if not rows:
-            nuke.message("Please select at least one row")
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select at least one row")
             return
 
-        # Filter: only OK rows, reject if any ERROR selected
         to_copy = []
         for row in rows:
             status = self.table.item(row, 1).text()
             if status == "ERROR":
                 name = self.table.item(row, 0).text()
-                nuke.message("Cannot collect: \"" + name + "\" is missing.\nDeselect error rows first.")
+                QtWidgets.QMessageBox.warning(self, "Read Manager", "Cannot collect: " + repr(name) + " is missing. Deselect error rows first.")
                 return
             to_copy.append(row)
 
         if not to_copy:
             return
 
-        # Ask for target directory
-        dest_dir = nuke.getFilename("Choose target directory")
+        dest_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose target directory")
         if not dest_dir:
             return
         if not os.path.isdir(dest_dir):
             try:
                 os.makedirs(dest_dir)
             except Exception as e:
-                nuke.message("Cannot create directory:\n" + str(e))
+                QtWidgets.QMessageBox.warning(self, "Read Manager", "Cannot create directory: " + str(e))
                 return
 
-        # Check for filename collisions
         seen = {}
         collisions = []
         entries = []
@@ -152,16 +184,15 @@ class ReadManagerTable(QtWidgets.QDialog):
             src = self.table.item(row, 2).text()
             fname = os.path.basename(src)
             if fname in seen:
-                collisions.append(fname + "\n  " + seen[fname] + "\n  " + src)
+                collisions.append(fname + " (" + seen[fname] + " vs " + src + ")")
             else:
                 seen[fname] = src
                 entries.append((row, src, os.path.join(dest_dir, fname)))
 
         if collisions:
-            nuke.message("Filename conflict detected. Aborted.\n\n" + "\n\n".join(collisions[:5]) + ("\n\n...and more" if len(collisions) > 5 else ""))
+            QtWidgets.QMessageBox.warning(self, "Read Manager", "Filename conflict. Aborted. " + "; ".join(collisions[:3]))
             return
 
-        # Copy files and update Read nodes
         copied = 0
         errors = []
         for row, src, dst in entries:
@@ -177,11 +208,58 @@ class ReadManagerTable(QtWidgets.QDialog):
 
         msg = "Collected " + str(copied) + " file(s) to " + dest_dir
         if errors:
-            msg += "\n\nErrors:\n" + "\n".join(errors)
-        nuke.message(msg)
+            msg += " | Errors: " + "; ".join(errors)
+        QtWidgets.QMessageBox.information(self, "Read Manager", msg)
         self._refresh()
-    
+    def _pick_path(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
 
+        dirs = []
+        for row in rows:
+            p = self.table.item(row, 2).text()
+            if p:
+                d = os.path.dirname(p.replace("\\", "/"))
+                dirs.append(d)
+
+        if len(dirs) == 1:
+            self.src_path.setText(dirs[0])
+        else:
+            # Find common prefix across all paths
+            prefix = dirs[0]
+            for d in dirs[1:]:
+                while prefix and not d.startswith(prefix):
+                    prefix = prefix[:prefix.rfind("/")] if "/" in prefix else ""
+            self.src_path.setText(prefix)
+
+    def _replace_path(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
+
+        src_prefix = self.src_path.text().strip().replace("\\", "/")
+        dst_prefix = self.dst_path.text().strip().replace("\\", "/")
+
+        if not src_prefix:
+            QtWidgets.QMessageBox.warning(self, "Read Manager", "Source path is empty")
+            return
+
+        count = 0
+        for row in rows:
+            old_path = self.table.item(row, 2).text().replace("\\", "/")
+            if old_path.startswith(src_prefix):
+                new_path = dst_prefix + old_path[len(src_prefix):]
+                name = self.table.item(row, 0).text()
+                node = nuke.toNode(name)
+                if node:
+                    node["file"].setValue(new_path)
+                    self.table.item(row, 2).setText(new_path)
+                    count += 1
+
+        QtWidgets.QMessageBox.information(self, "Read Manager", "Updated " + str(count) + " node(s)")
 
     def _reload(self):
         import importlib
