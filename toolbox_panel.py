@@ -2,7 +2,7 @@ import nuke, os, sys
 try: from PySide6 import QtWidgets, QtCore, QtGui
 except ImportError: from PySide2 import QtWidgets, QtCore, QtGui
 
-BASE = r'C:\Users\shaobaojia\.nuke'
+BASE = os.path.join(os.path.expanduser('~'), '.nuke')
 TOOLBOX = os.path.join(BASE, 'toolbox')
 
 TOOLS = {
