@@ -17,8 +17,8 @@ TOOLS = {
         ("write_reading_label",     "Write\u8282\u70b9\u6807\u7b7e",   "\u6309\u8f93\u51fa\u8def\u5f84\u81ea\u52a8\u8bbe\u7f6e\u6807\u7b7e"),
     ],
     "Stamp Tools": [
-        ("stamp_on",       "\u5f00\u542f\u7f29\u7565\u56fe", "\u9009\u4e2d\u8282\u70b9 \u2192 \u5f00\u542fPostage Stamp"),
         ("stamp_off",      "\u5173\u95ed\u7f29\u7565\u56fe", "\u9009\u4e2d\u8282\u70b9 \u2192 \u5173\u95edPostage Stamp"),
+        ("stamp_on",       "\u5f00\u542f\u7f29\u7565\u56fe", "\u9009\u4e2d\u8282\u70b9 \u2192 \u5f00\u542fPostage Stamp"),
         ("stamp_off_all",  "\u5173\u95ed\u6240\u6709",   "\u5173\u95ed\u5f53\u524d\u5de5\u7a0b\u6240\u6709Postage Stamp"),
     ],
 }
@@ -32,7 +32,7 @@ STAMP_ACTIONS = {
 }
 
 # Pairs of tools to put side-by-side: (group_name, [tool1, tool2])
-SIDE_BY_SIDE = {("Stamp Tools", "stamp_on", "stamp_off"), ("Write Tools", "write_reading_color", "write_reading_label"), ("Path Tools", "sel_reads", "sel_writes")}
+SIDE_BY_SIDE = {("Stamp Tools", "stamp_off", "stamp_on"), ("Write Tools", "write_reading_color", "write_reading_label"), ("Path Tools", "sel_reads", "sel_writes")}
 
 STYLE = """
 QWidget { background: #1e1e1e; color: #d4d4d4; font-size: 12px; }
