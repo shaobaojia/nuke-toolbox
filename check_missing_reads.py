@@ -1,11 +1,12 @@
-
 import nuke
 try:
     from PySide6 import QtWidgets, QtCore, QtGui
 except ImportError:
     from PySide2 import QtWidgets, QtCore, QtGui
-import os
-import shutil
+import os, shutil
+
+BS = chr(92)
+FS = "/"
 
 class ReadManagerTable(QtWidgets.QDialog):
     def __init__(self, reads, parent=None):
@@ -13,10 +14,8 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.setWindowTitle("Read Manager")
         self.setMinimumSize(860, 480)
         self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
-
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-
         self.table = QtWidgets.QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["Node", "Status", "File Path"])
@@ -30,12 +29,9 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.reads = reads
         self._populate()
         layout.addWidget(self.table)
-
-        error_count = sum(1 for _, e, _ in reads if e)
-        self.stats = QtWidgets.QLabel("Total: " + str(len(reads)) + " Read nodes  |  Errors: " + str(error_count))
+        ec = sum(1 for _, e, _ in reads if e)
+        self.stats = QtWidgets.QLabel("Total: " + str(len(reads)) + " Read nodes  |  Errors: " + str(ec))
         layout.addWidget(self.stats)
-
-        # Path Replace row
         rw = QtWidgets.QWidget()
         rl = QtWidgets.QHBoxLayout(rw)
         rl.setContentsMargins(0, 4, 0, 0)
@@ -61,8 +57,6 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.rel_btn.clicked.connect(self._to_relative)
         rl.addWidget(self.rel_btn)
         layout.addWidget(rw)
-
-        # Buttons
         btn = QtWidgets.QHBoxLayout()
         self.copy_all = QtWidgets.QPushButton("Copy All Errors")
         self.copy_sel = QtWidgets.QPushButton("Copy Selected")
@@ -76,7 +70,6 @@ class ReadManagerTable(QtWidgets.QDialog):
         btn.addWidget(self.refresh_btn)
         btn.addWidget(self.reload_btn)
         layout.addLayout(btn)
-
         self.copy_all.clicked.connect(self._copy_all)
         self.copy_sel.clicked.connect(self._copy_selected)
         self.select_btn.clicked.connect(self._select_in_graph)
@@ -110,14 +103,14 @@ class ReadManagerTable(QtWidgets.QDialog):
             if self.table.item(i, 1).text() == "ERROR":
                 lines.append(self.table.item(i, 0).text() + ": " + self.table.item(i, 2).text())
         if lines:
-            QtWidgets.QApplication.clipboard().setText("\n".join(lines))
+            QtWidgets.QApplication.clipboard().setText(chr(10).join(lines))
 
     def _copy_selected(self):
         lines = []
         for row in self._selected_rows():
             lines.append(self.table.item(row, 0).text() + ": " + self.table.item(row, 2).text())
         if lines:
-            QtWidgets.QApplication.clipboard().setText("\n".join(lines))
+            QtWidgets.QApplication.clipboard().setText(chr(10).join(lines))
 
     def _select_in_graph(self):
         rows = self._selected_rows()
@@ -131,13 +124,101 @@ class ReadManagerTable(QtWidgets.QDialog):
     def _refresh(self):
         self.reads = []
         for node in nuke.allNodes("Read"):
-            try: node['reload'].execute()
+            try: node["reload"].execute()
             except: pass
             self.reads.append((node.name(), node.hasError(), node.knob("file").value()))
         self._populate()
         ec = sum(1 for _, e, _ in self.reads if e)
         self.stats.setText("Total: " + str(len(self.reads)) + " Read nodes  |  Errors: " + str(ec))
         nuke.tprint("Refreshed: " + str(len(self.reads)) + " Read nodes, " + str(ec) + " errors")
+
+    def _reload(self):
+        import importlib
+        importlib.reload(__import__("check_missing_reads"))
+        self.close()
+        check_missing_reads()
+
+    def _pick_path(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
+        dirs = []
+        for row in rows:
+            p = self.table.item(row, 2).text()
+            if p:
+                d = os.path.dirname(p.replace(BS, FS))
+                dirs.append(d)
+        if len(dirs) == 1:
+            self.src_path.setText(dirs[0] + FS)
+        else:
+            prefix = dirs[0]
+            for d in dirs[1:]:
+                while prefix and not d.startswith(prefix):
+                    idx = prefix.rfind(FS)
+                    if idx < 0: prefix = ""; break
+                    prefix = prefix[:idx]
+            self.src_path.setText(prefix + FS)
+
+    def _replace_path(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
+        sp = self.src_path.text().strip().replace(BS, FS).rstrip(FS) + FS
+        dp = self.dst_path.text().strip().replace(BS, FS).rstrip(FS) + FS
+        if not sp:
+            QtWidgets.QMessageBox.warning(self, "Read Manager", "Source path is empty")
+            return
+        for row in rows:
+            if self.table.item(row, 1).text() == "ERROR":
+                QtWidgets.QMessageBox.warning(self, "Read Manager", "Cannot process missing files. Deselect error rows.")
+                return
+        seen = {}
+        entries = []
+        for row in rows:
+            op = self.table.item(row, 2).text().replace(BS, FS)
+            if not op.startswith(sp): continue
+            np = dp + op[len(sp):]
+            if np in seen:
+                QtWidgets.QMessageBox.warning(self, "Read Manager", "Destination conflict: " + np)
+                return
+            seen[np] = op
+            entries.append((row, op, np))
+        progress = QtWidgets.QProgressDialog("Copying files...", "Cancel", 0, len(entries), self)
+        progress.setWindowTitle("Read Manager")
+        progress.setWindowModality(QtCore.Qt.WindowModal)
+        progress.setMinimumDuration(500)
+        count = 0
+        errors = []
+        for idx, (row, op, np) in enumerate(entries):
+            if progress.wasCanceled():
+                errors.append("Cancelled by user")
+                break
+            progress.setValue(idx)
+            try:
+                src_dir = os.path.dirname(op)
+                dst_dir = os.path.dirname(np)
+                if dst_dir and not os.path.isdir(dst_dir):
+                    os.makedirs(dst_dir)
+                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+                name = self.table.item(row, 0).text()
+                node = nuke.toNode(name)
+                if node:
+                    clean = np
+                    if len(clean) > 1 and clean[1] == ":" and clean[2] != FS:
+                        clean = clean[:2] + FS + clean[2:]
+                    clean = os.path.normpath(clean).replace(BS, FS)
+                    node["file"].setValue(clean)
+                    self.table.item(row, 2).setText(clean)
+                count += 1
+            except Exception as e:
+                errors.append(os.path.basename(op) + ": " + str(e))
+        progress.setValue(len(entries))
+        msg = "Replaced " + str(count) + " file(s)"
+        if errors: msg += " | Errors: " + "; ".join(errors)
+        QtWidgets.QMessageBox.information(self, "Read Manager", msg)
+        self._refresh()
 
     def _to_relative(self):
         rows = self._selected_rows()
@@ -157,7 +238,7 @@ class ReadManagerTable(QtWidgets.QDialog):
             p = node.knob("file").value()
             if p and os.path.isabs(p):
                 try:
-                    rel = os.path.relpath(p, script_dir).replace("\\", "/")
+                    rel = os.path.relpath(p, script_dir).replace(BS, FS)
                     node["file"].setValue(rel)
                     self.table.item(row, 2).setText(rel)
                     count += 1
@@ -165,90 +246,9 @@ class ReadManagerTable(QtWidgets.QDialog):
                     skipped += 1
                 except: pass
         msg = "Converted " + str(count) + " to relative"
-        if skipped:
-            msg += " | " + str(skipped) + " skipped (different drive)"
+        if skipped: msg += " | " + str(skipped) + " skipped (different drive)"
         QtWidgets.QMessageBox.information(self, "Read Manager", msg)
         self._refresh()
-
-    def _reload(self):
-        import importlib
-        importlib.reload(__import__("check_missing_reads"))
-        self.close()
-        check_missing_reads()
-
-    def _pick_path(self):
-        rows = self._selected_rows()
-        if not rows:
-            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
-            return
-        dirs = []
-        for row in rows:
-            p = self.table.item(row, 2).text()
-            if p:
-                d = os.path.dirname(p.replace("\\", "/"))
-                dirs.append(d)
-        if len(dirs) == 1:
-            self.src_path.setText(dirs[0] + "/")
-        else:
-            prefix = dirs[0]
-            for d in dirs[1:]:
-                while prefix and not d.startswith(prefix):
-                    idx = prefix.rfind("/")
-                    if idx < 0: prefix = ""; break
-                    prefix = prefix[:idx]
-            self.src_path.setText(prefix + "/")
-
-    def _replace_path(self):
-        rows = self._selected_rows()
-        if not rows:
-            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
-            return
-        sp = self.src_path.text().strip().replace("\\", "/").rstrip("/") + "/"
-        dp = self.dst_path.text().strip().replace("\\", "/").rstrip("/") + "/"
-        if not sp:
-            QtWidgets.QMessageBox.warning(self, "Read Manager", "Source path is empty")
-            return
-
-        for row in rows:
-            if self.table.item(row, 1).text() == "ERROR":
-                QtWidgets.QMessageBox.warning(self, "Read Manager", "Cannot process missing files. Deselect error rows.")
-                return
-
-        seen = {}
-        entries = []
-        for row in rows:
-            op = self.table.item(row, 2).text().replace("\\", "/")
-            if not op.startswith(sp): continue
-            np = dp + op[len(sp):]
-            if np in seen:
-                QtWidgets.QMessageBox.warning(self, "Read Manager", "Destination conflict: " + np)
-                return
-            seen[np] = op
-            entries.append((row, op, np))
-
-        count = 0
-        errors = []
-        for row, op, np in entries:
-            try:
-                dd = os.path.dirname(np)
-                if dd and not os.path.isdir(dd):
-                    os.makedirs(dd)
-                shutil.copy2(op, np)
-                name = self.table.item(row, 0).text()
-                node = nuke.toNode(name)
-                if node:
-                    node["file"].setValue(np)
-                    self.table.item(row, 2).setText(np)
-                count += 1
-            except Exception as e:
-                errors.append(os.path.basename(op) + ": " + str(e))
-
-        msg = "Replaced " + str(count) + " file(s)"
-        if errors: msg += " | Errors: " + "; ".join(errors)
-        QtWidgets.QMessageBox.information(self, "Read Manager", msg)
-        self._refresh()
-
-
 
 _panel = None
 
