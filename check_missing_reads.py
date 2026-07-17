@@ -13,7 +13,7 @@ class ReadManagerTable(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle("Read Manager")
         self.setMinimumSize(860, 480)
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         self.table = QtWidgets.QTableWidget()
@@ -252,10 +252,19 @@ class ReadManagerTable(QtWidgets.QDialog):
 
 _panel = None
 
+def _nuke_main_window():
+    from PySide6 import QtWidgets
+    app = QtWidgets.QApplication.instance()
+    if app:
+        for w in app.topLevelWidgets():
+            if 'DockMainWindow' in w.metaObject().className():
+                return w
+    return None
+
 def check_missing_reads():
     global _panel
     reads = []
     for node in nuke.allNodes("Read"):
         reads.append((node.name(), node.hasError(), node.knob("file").value()))
-    _panel = ReadManagerTable(reads)
+    _panel = ReadManagerTable(reads, _nuke_main_window())
     _panel.show()

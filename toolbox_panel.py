@@ -7,19 +7,19 @@ TOOLBOX = os.path.join(BASE, 'toolbox')
 
 TOOLS = {
     "Path Tools": [
-        ("sel_reads", "\u9009\u62e9\u6240\u6709Read\u8282\u70b9", "\u4e00\u952e\u9009\u4e2d\u5f53\u524d\u5de5\u7a0b\u4e2d\u6240\u6709Read\u8282\u70b9"),
-        ("sel_writes", "\u9009\u62e9\u6240\u6709Write\u8282\u70b9", "\u4e00\u952e\u9009\u4e2d\u5f53\u524d\u5de5\u7a0b\u4e2d\u6240\u6709Write\u8282\u70b9"),
-        ("convert_paths_to_relative", "\u8def\u5f84\u8f6c\u76f8\u5bf9", "\u5c06Read\u8282\u70b9\u8def\u5f84\u8f6c\u4e3a\u76f8\u5bf9\u8def\u5f84"),
-    ],
-    "Write Tools": [
-        ("create_write_from_read",  "\u4eceRead\u521b\u5efaWrite", "\u9009\u4e2dRead\u8282\u70b9\uff0c\u81ea\u52a8\u751f\u6210Write\u8282\u70b9"),
-        ("write_reading_color",     "Write\u8282\u70b9\u7740\u8272",   "\u6309\u6269\u5c55\u540d\u81ea\u52a8\u8bbe\u7f6e\u6807\u8bc6\u989c\u8272"),
-        ("write_reading_label",     "Write\u8282\u70b9\u6807\u7b7e",   "\u6309\u8f93\u51fa\u8def\u5f84\u81ea\u52a8\u8bbe\u7f6e\u6807\u7b7e"),
+        ("sel_reads", "\u9009\u62e9\u6240\u6709Read", "\u4e00\u952e\u9009\u4e2d\u5f53\u524d\u5de5\u7a0b\u4e2d\u6240\u6709Read"),
+        ("sel_writes", "\u9009\u62e9\u6240\u6709Write", "\u4e00\u952e\u9009\u4e2d\u5f53\u524d\u5de5\u7a0b\u4e2d\u6240\u6709Write"),
+        ("convert_paths_to_relative", "\u8def\u5f84\u8f6c\u76f8\u5bf9", "\u5c06Read\u8def\u5f84\u8f6c\u4e3a\u76f8\u5bf9\u8def\u5f84"),
     ],
     "Stamp Tools": [
-        ("stamp_off",      "\u5173\u95ed\u7f29\u7565\u56fe", "\u9009\u4e2d\u8282\u70b9 \u2192 \u5173\u95edPostage Stamp"),
-        ("stamp_on",       "\u5f00\u542f\u7f29\u7565\u56fe", "\u9009\u4e2d\u8282\u70b9 \u2192 \u5f00\u542fPostage Stamp"),
+        ("stamp_off",      "\u5173\u95ed\u7f29\u7565\u56fe", "\u9009\u4e2d \u2192 \u5173\u95edPostage Stamp"),
+        ("stamp_on",       "\u5f00\u542f\u7f29\u7565\u56fe", "\u9009\u4e2d \u2192 \u5f00\u542fPostage Stamp"),
         ("stamp_off_all",  "\u5173\u95ed\u6240\u6709",   "\u5173\u95ed\u5f53\u524d\u5de5\u7a0b\u6240\u6709Postage Stamp"),
+    ],
+    "Write Tools": [
+        ("create_write_from_read",  "\u4eceRead\u521b\u5efaWrite", "\u9009\u4e2dRead\uff0c\u81ea\u52a8\u751f\u6210Write"),
+        ("write_reading_color",     "Write\u7740\u8272",   "\u6309\u6269\u5c55\u540d\u81ea\u52a8\u8bbe\u7f6e\u6807\u8bc6\u989c\u8272"),
+        ("write_reading_label",     "Write\u6807\u7b7e",   "\u6309\u8f93\u51fa\u8def\u5f84\u81ea\u52a8\u8bbe\u7f6e\u6807\u7b7e"),
     ],
 }
 
@@ -42,7 +42,11 @@ QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }
 QPushButton { background: #2d2d2d; border: 1px solid #444; border-radius: 4px; padding: 8px 12px; text-align: left; color: #d4d4d4; }
 QPushButton:hover { background: #3a3a3a; border-color: #0078d4; }
 QPushButton:pressed { background: #1a1a1a; }
+QLineEdit { background: #252525; border: 1px solid #444; border-radius: 4px; padding: 6px 8px; color: #d4d4d4; }
+QLineEdit:focus { border-color: #0078d4; }
 QPushButton#refresh { background: #0e639c; border-color: #0078d4; }
+QLineEdit { background: #252525; border: 1px solid #444; border-radius: 4px; padding: 6px 8px; color: #d4d4d4; }
+QLineEdit:focus { border-color: #0078d4; }
 QPushButton#refresh:hover { background: #1177bb; }
 QPushButton#stamp_on { background: #1a3a1a; border-color: #2e7d32; }
 QPushButton#stamp_on:hover { background: #2a4a2a; }
@@ -71,14 +75,14 @@ class ToolRow(QtWidgets.QWidget):
         layout.addWidget(self.desc_label)
         self.btn.clicked.connect(lambda: self.clicked.emit(mod_name))
 
-class ToolboxWindow(QtWidgets.QWidget):
-    def __init__(self):
-        super().__init__()
+class ToolboxWindow(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("\u6548\u7387\u9762\u677f")
-        self.setMinimumSize(480, 680)
-        self.resize(480, 680)
+        self.setMinimumSize(420, 680)
+        self.resize(420, 680)
         self.setStyleSheet(STYLE)
-        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.WindowStaysOnTopHint)
+        
         self._paths = {}
 
         main = QtWidgets.QVBoxLayout(self)
@@ -151,6 +155,26 @@ class ToolboxWindow(QtWidgets.QWidget):
 
             scroll_layout.addWidget(gb)
 
+        # Write Path group
+        gb = QtWidgets.QGroupBox("Write Path")
+        gb_layout = QtWidgets.QVBoxLayout(gb)
+        gb_layout.setSpacing(4)
+        self.write_path = QtWidgets.QLineEdit()
+        self.write_path.setPlaceholderText("path for selected Write nodes")
+        gb_layout.addWidget(self.write_path)
+        btn_w = QtWidgets.QWidget()
+        btn_l = QtWidgets.QHBoxLayout(btn_w)
+        btn_l.setContentsMargins(0, 0, 0, 0)
+        btn_l.setSpacing(4)
+        self.pick_name_btn = QtWidgets.QPushButton("Pick")
+        self.pick_name_btn.clicked.connect(self._pick_script_name)
+        btn_l.addWidget(self.pick_name_btn)
+        self.fill_btn = QtWidgets.QPushButton("Fill")
+        self.fill_btn.clicked.connect(self._fill_write_path)
+        btn_l.addWidget(self.fill_btn)
+        gb_layout.addWidget(btn_w)
+        scroll_layout.addWidget(gb)
+
         scroll_layout.addStretch()
         scroll.setWidget(scroll_w)
         main.addWidget(scroll)
@@ -163,12 +187,38 @@ class ToolboxWindow(QtWidgets.QWidget):
 
         QtCore.QTimer.singleShot(0, self._fit_content)
 
+    def _pick_script_name(self):
+        name = os.path.splitext(os.path.basename(nuke.scriptName()))[0]
+        if not name:
+            return
+        current = self.write_path.text().strip()
+        if name in current.split("/")[-1]:
+            return
+        if current and not current.endswith("/"):
+            current += "/"
+        self.write_path.setText(current + name)
+
+    def _fill_write_path(self):
+        text = self.write_path.text().strip()
+        if not text:
+            return
+        nodes = nuke.selectedNodes("Write")
+        if not nodes:
+            # Also check generic selection for Write class
+            sel = nuke.selectedNodes()
+            nodes = [n for n in sel if n.Class() == "Write"]
+        if not nodes:
+            nuke.message("Please select Write nodes first")
+            return
+        for node in nodes:
+            node["file"].setValue(text.replace(chr(92), "/"))
+
     def _fit_content(self):
         sa = self.findChild(QtWidgets.QScrollArea)
         if sa and sa.widget():
             h = sa.widget().sizeHint().height()
             extra = self.height() - sa.height()
-            self.resize(480, h + extra + 8)
+            self.resize(420, h + extra + 8)
 
     def _handle(self, mod_name):
         _orig = nuke.message
@@ -183,7 +233,7 @@ class ToolboxWindow(QtWidgets.QWidget):
             try:
                 nodes = nuke.selectedNodes()
                 if mod_name in ("stamp_on","stamp_off") and not nodes:
-                    nuke.message("\u8bf7\u5148\u9009\u62e9\u8282\u70b9")
+                    nuke.message("\u8bf7\u5148\u9009\u62e9")
                     return
                 STAMP_ACTIONS[mod_name](nodes)
             except Exception as e: nuke.message("Error: "+str(e))
@@ -202,10 +252,19 @@ class ToolboxWindow(QtWidgets.QWidget):
 
 _toolbox_window = None
 
+def _nuke_main_window():
+    from PySide6 import QtWidgets
+    app = QtWidgets.QApplication.instance()
+    if app:
+        for w in app.topLevelWidgets():
+            if "DockMainWindow" in w.metaObject().className():
+                return w
+    return None
+
 def show_toolbox():
     global _toolbox_window
     if _toolbox_window:
         try: _toolbox_window.close()
         except: pass
-    _toolbox_window = ToolboxWindow()
+    _toolbox_window = ToolboxWindow(_nuke_main_window())
     _toolbox_window.show()
