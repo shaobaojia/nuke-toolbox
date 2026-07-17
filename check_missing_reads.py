@@ -263,6 +263,9 @@ def _nuke_main_window():
 
 def check_missing_reads():
     global _panel
+    if _panel:
+        try: _panel.close()
+        except: pass
     reads = []
     for node in nuke.allNodes("Read"):
         reads.append((node.name(), node.hasError(), node.knob("file").value()))
