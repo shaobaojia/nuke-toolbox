@@ -1,7 +1,10 @@
 # === Nuke Bridge Server v7 ===
-import socket, threading, sys, traceback
+import socket, threading, sys, traceback, os
 from io import StringIO
 import nuke
+
+# toolbox/ 目录加入 Nuke 的 import 路径（便携，不硬编码用户名）
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'toolbox'))
 
 BASE_PORT = 54321
 
@@ -181,5 +184,5 @@ nuke.menu('Nodes').addMenu('custom').addCommand('Z Fog v1.1', "nuke.nodePaste(r'
 
 nuke.menu("Nuke").addCommand("Toolbox/Read 管理器", "import check_missing_reads; check_missing_reads.check_missing_reads()")
 nuke.menu("Nuke").addCommand("Toolbox/AOV Generator Pro", "import aov_generator_pro; aov_generator_pro.launch_pro()", "F2")
-nuke.menu("Nuke").addCommand("Toolbox/效率面板", "toolbox_panel.show_toolbox()")
-nuke.menu("Nuke").addCommand("Toolbox/工程管理", "import sys; sys.path.insert(0, r'C:/Users/shaobaojia/.nuke/toolbox'); import nuke_project_manager; nuke_project_manager.show_panel()")
+nuke.menu("Nuke").addCommand("Toolbox/效率面板", "import toolbox_panel; toolbox_panel.show_toolbox()")
+nuke.menu("Nuke").addCommand("Toolbox/工程管理", "import nuke_project_manager; nuke_project_manager.show_panel()")

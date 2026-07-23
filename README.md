@@ -1,55 +1,44 @@
 # Nuke Toolbox
 
-Nuke 效率面板工具集 — Read/Write 节点操作、Postage Stamp 管理。
+Nuke 效率工具箱 — Read 管理器、工程管理、AOV 拆层、效率面板。
 
-## 脚本
+## 目录结构
 
-| 脚本 | 功能 |
-|:--|:--|
-| `toolbox_panel.py` | PySide 效率面板 UI（分组卡片、暗色主题） |
-| `convert_paths_to_relative.py` | Read/Write 节点绝对路径 → 相对路径 |
-| `create_write_from_read.py` | 选中 Read → 自动生成 Write 节点 |
-| `write_reading_color.py` | Write 节点按扩展名着色 |
-| `write_reading_label.py` | Write 节点按路径设标签 |
-| `aov_generator_pro.py` | EXR 多通道 AOV 合成链生成器 |
-| `check_missing_reads.py` | 检测丢失的 Read 节点 |
-
-Nuke 13 / 14 / 16 兼容（PySide2 / PySide6 自动适配）。
+```
+.                    → 复制到 ~/.nuke/
+├── init.py          → 环境初始化（sys.path + 插件路径）
+├── menu.py          → 菜单注册 + Nuke Bridge 服务端
+│
+└── toolbox/         → 复制到 ~/.nuke/toolbox/
+    ├── toolbox_panel.py        → 效率面板（自包含：路径转换、Postage Stamp、Write 创建/标签）
+    ├── check_missing_reads.py  → Read 管理器（支持 Read/DeepRead/ReadGeo/Camera2/Camera，含搜索面板和 Match All）
+    ├── nuke_project_manager.py → 工程管理器（创建 Nuke 工程目录，模板复制，冲突检测）
+    └── aov_generator_pro.py   → AOV 拆层工具（F2 快捷键）
+```
 
 ## 安装
 
 ```bash
-git clone https://github.com/shaobaojia/nuke-toolbox.git
+# 复制根文件
+cp init.py menu.py ~/.nuke/
+
+# 复制工具箱
+cp -r toolbox ~/.nuke/
 ```
 
-将 `.py` 文件复制到 `~/.nuke/`：
+重启 Nuke。
 
-```bash
-# 面板和独立脚本 → .nuke 根目录
-cp nuke-toolbox/toolbox_panel.py ~/.nuke/
-cp nuke-toolbox/aov_generator_pro.py ~/.nuke/
-cp nuke-toolbox/check_missing_reads.py ~/.nuke/
+## 菜单入口
 
-# 内部工具脚本 → .nuke/toolbox/
-mkdir -p ~/.nuke/toolbox
-cp nuke-toolbox/convert_paths_to_relative.py ~/.nuke/toolbox/
-cp nuke-toolbox/create_write_from_read.py ~/.nuke/toolbox/
-cp nuke-toolbox/write_reading_color.py ~/.nuke/toolbox/
-cp nuke-toolbox/write_reading_label.py ~/.nuke/toolbox/
-```
+| 菜单 | 功能 |
+|------|------|
+| Toolbox → 效率面板 | 一站式面板：路径转换、Stamp 开关、Write 工具 |
+| Toolbox → Read 管理器 | Read/DeepRead/ReadGeo/Camera 文件路径管理 + 搜索换链 |
+| Toolbox → 工程管理 | 创建标准化 Nuke 工程目录 |
+| Toolbox → AOV Generator Pro | AOV 自动拆层（快捷键 F2） |
 
-在 `~/.nuke/init.py` 中添加：
+## 注意事项
 
-```python
-import toolbox_panel
-```
-
-在 `~/.nuke/menu.py` 末尾添加菜单入口：
-
-```python
-nuke.menu("Nuke").addCommand("Toolbox/效率面板", "toolbox_panel.show_toolbox()")
-nuke.menu("Nuke").addCommand("Toolbox/AOV Generator Pro", "import aov_generator_pro; aov_generator_pro.launch_pro()", "F2")
-nuke.menu("Nuke").addCommand("Toolbox/Check Missing Reads", "import check_missing_reads; check_missing_reads.check_missing_reads()")
-```
-
-重启 Nuke，菜单栏 `Toolbox → 效率面板` 即可打开。
+- `init.py` 中的 `sys.path` 使用 `__file__` 相对路径，**换机器无需修改**
+- `menu.py` 包含 Nuke Bridge（TCP:54321），已部署 v7 稳定版
+- Read 管理器需要 PySide6（Nuke 15+）或 PySide2（Nuke 13-14）
