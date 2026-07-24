@@ -222,8 +222,8 @@ class BridgeMonitor(QtWidgets.QDialog):
         br.addWidget(self.clear_btn)
         layout.addLayout(br)
 
-        self.bridge.log.on_add(self._on_log)
-        self._t = QtCore.QTimer(); self._t.timeout.connect(self._tick); self._t.start(1000)
+        self._t = QtCore.QTimer(); self._t.timeout.connect(self._tick); self._t.start(500)
+        self._log_idx = 0  # 已显示到的日志索引（主线程安全）
         self._tick()
         self._replay_log()
 
@@ -238,14 +238,21 @@ class BridgeMonitor(QtWidgets.QDialog):
         else:
             self.status.setText("Port {}  |  Stopped".format(self.bridge.port))
         self.active_label.setText("Active: {}".format(self.bridge.active))
+        # 轮询新日志（主线程安全，不从桥线程回调）
+        with self.bridge.log._lock:
+            new_entries = self.bridge.log.entries[self._log_idx:]
+            self._log_idx = len(self.bridge.log.entries)
+        for e in new_entries:
+            self._append_row(e)
 
     def _replay_log(self):
-        """回放已有日志到表格。"""
-        for entry in self.bridge.log.entries:
-            self._append_row(entry)
+        with self.bridge.log._lock:
+            for entry in self.bridge.log.entries:
+                self._append_row(entry)
+            self._log_idx = len(self.bridge.log.entries)
 
     def _on_log(self, entry):
-        self._append_row(entry)
+        pass  # 不再使用回调，改为 _tick 轮询
 
     def _append_row(self, entry):
         row = self.table.rowCount()
