@@ -14,14 +14,17 @@ MEDIA_EXTS = SEQ_EXTS | MOVIE_EXTS
 
 FRAME_FILE_RE = re.compile(r"^(?P<stem>.+)\.(?P<frame>\d+)\.(?P<ext>[A-Za-z0-9]+)$")
 
-READ_CLASSES = ("Read", "DeepRead", "ReadGeo", "Camera2", "Camera")
+READ_CLASSES = ("Read", "DeepRead", "ReadGeo", "Camera2", "Camera3", "Camera")
 
 HAS_FRAME_RANGE = {"Read", "DeepRead"}
 
 
 def _all_reader_nodes():
     """Yield (name, class_name, has_error, file_path) for all reader-type nodes."""
-    for n in nuke.allNodes():
+    for n in nuke.allNodes(recurseGroups=True):
+        # 跳过插件 Gizmo 内部节点（ShowLogo / CompanyLogo 等）
+        if n.fullName().count(".") > 0:
+            continue
         cls = n.Class()
         if cls not in READ_CLASSES:
             continue
@@ -29,6 +32,8 @@ def _all_reader_nodes():
         if not fk:
             continue
         p = fk.value()
+        try: n["reload"].execute()  # 强制重新校验文件存在性（Nuke 缓存 error 状态）
+        except: pass  # Camera/ReadGeo 无 reload knob
         try:
             err = n.hasError()
         except Exception:
@@ -181,6 +186,10 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.dst_path = QtWidgets.QLineEdit()
         self.dst_path.setPlaceholderText("replacement path")
         rl.addWidget(self.dst_path)
+        self.relink_btn = QtWidgets.QPushButton("Relink")
+        self.relink_btn.setFixedWidth(48)
+        self.relink_btn.clicked.connect(self._relink)
+        rl.addWidget(self.relink_btn)
         self.replace_btn = QtWidgets.QPushButton("Replace+Copy")
         self.replace_btn.setFixedWidth(90)
         self.replace_btn.clicked.connect(self._replace_path)
@@ -500,6 +509,34 @@ class ReadManagerTable(QtWidgets.QDialog):
                     if idx < 0: prefix = ""; break
                     prefix = prefix[:idx]
             self.src_path.setText(prefix + FS)
+
+    def _relink(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
+        sp = self.src_path.text().strip().replace(BS, FS).rstrip(FS) + FS
+        dp = self.dst_path.text().strip().replace(BS, FS).rstrip(FS) + FS
+        if not sp:
+            QtWidgets.QMessageBox.warning(self, "Read Manager", "Source path is empty")
+            return
+        count = 0
+        for row in rows:
+            op = self.table.item(row, 3).text().replace(BS, FS)
+            if not op.startswith(sp): continue
+            np = dp + op[len(sp):]
+            name = self.table.item(row, 0).text()
+            node = nuke.toNode(name)
+            if node:
+                clean = np
+                if len(clean) > 1 and clean[1] == ":" and clean[2] != FS:
+                    clean = clean[:2] + FS + clean[2:]
+                clean = os.path.normpath(clean).replace(BS, FS)
+                node["file"].setValue(clean)
+                self.table.item(row, 3).setText(clean)
+                count += 1
+        QtWidgets.QMessageBox.information(self, "Read Manager", "Relinked " + str(count) + " node(s)")
+        self._refresh()
 
     def _replace_path(self):
         rows = self._selected_rows()
