@@ -1,11 +1,11 @@
-"""Nuke Bridge — 独立 TCP 桥 + 监看面板（可重启、双 socket 反压、1MB 上限）"""
+"""Nuke Bridge — 独立 TCP 桥 + 监看面板（手动端口、回包验证、可重启）"""
 import socket, threading, sys, traceback, time, os
 from io import StringIO
 import nuke
 try: from PySide6 import QtWidgets, QtCore, QtGui
 except ImportError: from PySide2 import QtWidgets, QtCore, QtGui
 
-BASE_PORT = 54321
+BASE_PORT = 54322
 MAX_LOG = 500
 
 
@@ -19,6 +19,7 @@ class BridgeServer:
         self.started_at = None
         self._listen_sock = None
         self.log = BridgeLog()
+        self.verified = False  # 收到过至少一次成功回包才为 True
 
     def _find_port(self):
         for p in range(BASE_PORT, BASE_PORT + 10):
@@ -45,6 +46,7 @@ class BridgeServer:
 
     def stop(self):
         self.running = False
+        self.verified = False
         if self._listen_sock:
             try: self._listen_sock.close()
             except: pass
@@ -112,6 +114,7 @@ class BridgeServer:
             if err.getvalue():
                 self.log.add("error", "← Error", err.getvalue()[:500])
             elif result:
+                self.verified = True  # 成功回包 → 标记 verified
                 display = result[:100].replace("\n", " ")
                 self.log.add("exec", "← {}".format(display) + ("..." if len(result) > 100 else ""))
 
@@ -193,11 +196,29 @@ class BridgeMonitor(QtWidgets.QDialog):
         sr.addWidget(self.restart_btn)
         layout.addLayout(sr)
 
+        # ── 端口控制行 ──
+        pr = QtWidgets.QHBoxLayout()
+        pr.addWidget(QtWidgets.QLabel("Port:"))
+        self.port_edit = QtWidgets.QLineEdit(str(self.bridge.port))
+        self.port_edit.setFixedWidth(60)
+        pr.addWidget(self.port_edit)
+        self.test_btn = QtWidgets.QPushButton("Test")
+        self.test_btn.setMinimumWidth(48)
+        self.test_btn.clicked.connect(self._test_port)
+        pr.addWidget(self.test_btn)
+        self.connect_btn = QtWidgets.QPushButton("Connect")
+        self.connect_btn.setMinimumWidth(64)
+        self.connect_btn.clicked.connect(self._connect_port)
+        pr.addWidget(self.connect_btn)
+        pr.addStretch()
+        layout.addLayout(pr)
+
         # ── 日志表格 ──
         self.table = QtWidgets.QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["Time", "Type", "Message"])
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.verticalHeader().setVisible(False)
@@ -214,6 +235,9 @@ class BridgeMonitor(QtWidgets.QDialog):
         self.send_btn = QtWidgets.QPushButton("Send")
         self.send_btn.clicked.connect(self._send)
         br.addWidget(self.send_btn)
+        self.copy_sel_btn = QtWidgets.QPushButton("Copy Selected")
+        self.copy_sel_btn.clicked.connect(self._copy_selected)
+        br.addWidget(self.copy_sel_btn)
         self.copy_btn = QtWidgets.QPushButton("Copy Last Error")
         self.copy_btn.clicked.connect(self._copy_error)
         br.addWidget(self.copy_btn)
@@ -229,12 +253,16 @@ class BridgeMonitor(QtWidgets.QDialog):
 
     # ── 状态轮询 ──
     def _tick(self):
-        r = self.bridge.running
-        self.dot.setText("●" if r else "○")
-        self.dot.setStyleSheet("color: {}; font-size: 14px; font-weight: bold;".format("#00FF00" if r else "#FF4444"))
-        if r and self.bridge.started_at:
+        # 灯逻辑：running AND verified 才绿，否则红
+        ok = self.bridge.running and self.bridge.verified
+        self.dot.setText("●" if ok else "○")
+        self.dot.setStyleSheet("color: {}; font-size: 14px; font-weight: bold;".format("#00FF00" if ok else "#FF4444"))
+        if self.bridge.running and self.bridge.started_at:
             s = int(time.time() - self.bridge.started_at); m, sec = divmod(s, 60)
-            self.status.setText("Port {}  |  Up {}m{:02d}s".format(self.bridge.port, m, sec))
+            txt = "Port {}  |  Up {}m{:02d}s".format(self.bridge.port, m, sec)
+            if not self.bridge.verified:
+                txt += "  |  unverified"
+            self.status.setText(txt)
         else:
             self.status.setText("Port {}  |  Stopped".format(self.bridge.port))
         self.active_label.setText("Active: {}".format(self.bridge.active))
@@ -275,6 +303,67 @@ class BridgeMonitor(QtWidgets.QDialog):
         while self.table.rowCount() > MAX_LOG:
             self.table.removeRow(0)
 
+    # ── 端口控制 ──
+    def _test_port(self):
+        """异步测试端口：后台线程执行，不冻结 UI。"""
+        try:
+            port = int(self.port_edit.text().strip())
+        except ValueError:
+            self.bridge.log.add("error", "Invalid port number")
+            return
+        self.bridge.log.add("info", "Testing port {}...".format(port))
+        self.test_btn.setEnabled(False)
+        self.test_btn.setText("...")
+        t = threading.Thread(target=self._test_port_bg, args=(port,), daemon=True)
+        t.start()
+
+    def _test_port_bg(self, port):
+        """后台执行 Test，结果通过日志输出。"""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)
+            s.connect(("127.0.0.1", port))
+            s.sendall(b'print("PING")')
+            s.shutdown(socket.SHUT_WR)
+            time.sleep(10)
+            resp = b""
+            s.settimeout(8)
+            try:
+                while True:
+                    c = s.recv(4096)
+                    if not c: break
+                    resp += c
+            except: pass
+            s.close()
+            if b"PING" in resp:
+                self.bridge.log.add("info", "Port {} OK — received PING back".format(port))
+                self.bridge.verified = True
+            else:
+                self.bridge.log.add("error", "Port {} connected but no response (wrong Nuke?)".format(port))
+        except Exception as e:
+            self.bridge.log.add("error", "Port {} test failed: {}".format(port, e))
+        finally:
+            # 恢复按钮（用 QTimer.singleShot 确保主线程执行）
+            def restore():
+                self.test_btn.setEnabled(True)
+                self.test_btn.setText("Test")
+            QtCore.QTimer.singleShot(0, restore)
+
+    def _connect_port(self):
+        """切换到新端口并重启桥。"""
+        try:
+            port = int(self.port_edit.text().strip())
+        except ValueError:
+            self.bridge.log.add("error", "Invalid port number")
+            return
+        if port == self.bridge.port:
+            self.bridge.log.add("info", "Port unchanged ({})".format(port))
+            return
+        self.bridge.stop()
+        self.bridge.port = port
+        self.bridge.log.add("info", "Switching to port {}...".format(port))
+        QtCore.QTimer.singleShot(600, lambda: (self.bridge.start(), self._tick()))
+
     # ── 按钮回调 ──
     def _clear(self):
         self.table.setRowCount(0)
@@ -301,7 +390,21 @@ class BridgeMonitor(QtWidgets.QDialog):
         if err.getvalue():
             self.bridge.log.add("error", "← [panel] Error", err.getvalue()[:500])
         elif result.strip():
+            self.bridge.verified = True
             self.bridge.log.add("exec", "← [panel] {}".format(result.strip()[:200]))
+
+    def _copy_selected(self):
+        rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()))
+        if not rows:
+            return
+        lines = []
+        for row in rows:
+            t = self.table.item(row, 0).text()
+            k = self.table.item(row, 1).text()
+            m = self.table.item(row, 2).text()
+            lines.append(t + "  " + k + "  " + m)
+        QtWidgets.QApplication.clipboard().setText(chr(10).join(lines))
+        nuke.tprint("Copied " + str(len(lines)) + " log entries")
 
     def _copy_error(self):
         for entry in reversed(self.bridge.log.entries):

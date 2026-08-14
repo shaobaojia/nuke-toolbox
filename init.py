@@ -9,3 +9,9 @@ if QtWidgets.QApplication.instance():
     nuke_bridge.get_bridge()
 
 nuke.pluginAddPath("./NukeSurvivalToolkit")
+
+nuke.pluginAddPath('Lin_ToolSets')
+
+nuke.pluginAddPath('./MoreRealistic')
+
+nuke.pluginAddPath('./XXXX')

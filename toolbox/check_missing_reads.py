@@ -3,7 +3,7 @@ try:
     from PySide6 import QtWidgets, QtCore, QtGui
 except ImportError:
     from PySide2 import QtWidgets, QtCore, QtGui
-import os, shutil, re
+import os, shutil, re, subprocess
 
 BS = chr(92)
 FS = "/"
@@ -13,6 +13,26 @@ MOVIE_EXTS = {"mov", "mp4", "mxf", "r3d", "avi"}
 MEDIA_EXTS = SEQ_EXTS | MOVIE_EXTS
 
 FRAME_FILE_RE = re.compile(r"^(?P<stem>.+)\.(?P<frame>\d+)\.(?P<ext>[A-Za-z0-9]+)$")
+
+PYTHON_EXPR_RE = re.compile(r"\[python \{([^}]*)\}\]")
+
+
+def _resolve_hotknob(p):
+    """求值 [python {...}] hotknob 表达式（只注入 nuke，禁内置函数）。"""
+    def sub(m):
+        try:
+            return str(eval(m.group(1), {"nuke": nuke, "__builtins__": {}}))
+        except Exception:
+            return m.group(0)
+    return PYTHON_EXPR_RE.sub(sub, p)
+
+
+def _resolve_path(p):
+    """解析 hotknob 表达式 + 相对路径为绝对路径（相对 nuke.script_directory）。"""
+    p = _resolve_hotknob(p)
+    if not os.path.isabs(p) and nuke.script_directory():
+        p = os.path.join(nuke.script_directory(), p)
+    return _fix_path(p)
 
 READ_CLASSES = ("Read", "DeepRead", "ReadGeo", "Camera2", "Camera3", "Camera")
 
@@ -194,6 +214,10 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.replace_btn.setFixedWidth(90)
         self.replace_btn.clicked.connect(self._replace_path)
         rl.addWidget(self.replace_btn)
+        self.replace_move_btn = QtWidgets.QPushButton("Replace+Move")
+        self.replace_move_btn.setFixedWidth(96)
+        self.replace_move_btn.clicked.connect(lambda: self._replace_path(move=True))
+        rl.addWidget(self.replace_move_btn)
         self.rel_btn = QtWidgets.QPushButton("Rel")
         self.rel_btn.setFixedWidth(36)
         self.rel_btn.clicked.connect(self._to_relative)
@@ -207,11 +231,13 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.copy_all = QtWidgets.QPushButton("Copy All Errors")
         self.copy_sel = QtWidgets.QPushButton("Copy Selected")
         self.select_btn = QtWidgets.QPushButton("Select in Node Graph")
+        self.open_btn = QtWidgets.QPushButton("Open Explorer")
         self.refresh_btn = QtWidgets.QPushButton("Refresh Data")
         self.reload_btn = QtWidgets.QPushButton("Reload UI")
         btn.addWidget(self.copy_all)
         btn.addWidget(self.copy_sel)
         btn.addWidget(self.select_btn)
+        btn.addWidget(self.open_btn)
         btn.addStretch()
         btn.addWidget(self.refresh_btn)
         btn.addWidget(self.reload_btn)
@@ -219,6 +245,7 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.copy_all.clicked.connect(self._copy_all)
         self.copy_sel.clicked.connect(self._copy_selected)
         self.select_btn.clicked.connect(self._select_in_graph)
+        self.open_btn.clicked.connect(self._open_in_explorer)
         self.refresh_btn.clicked.connect(self._refresh)
         self.reload_btn.clicked.connect(self._reload)
         self.table.doubleClicked.connect(self._select_in_graph)
@@ -229,6 +256,49 @@ class ReadManagerTable(QtWidgets.QDialog):
         self.search_panel = self._build_search_panel()
         self.search_panel.setVisible(False)
         self.splitter.addWidget(self.search_panel)
+
+        # Node Graph 选中/双击 Read 节点 → 列表自动跳转
+        # 双通道：QTimer 轮询（主，Qt 事件循环稳定触发）+ updateUI（辅）
+        self._last_sel = None
+        self._node_sync_cb = self._sync_from_node_graph
+        nuke.addUpdateUI(self._node_sync_cb)
+        self._sync_timer = QtCore.QTimer(self)
+        self._sync_timer.setInterval(500)
+        self._sync_timer.timeout.connect(self._node_sync_cb)
+        self._sync_timer.start()
+
+    def closeEvent(self, event):
+        try:
+            self._sync_timer.stop()
+        except Exception:
+            pass
+        try:
+            nuke.removeUpdateUI(self._node_sync_cb)
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+    def _sync_from_node_graph(self):
+        """轮询回调：Node Graph 中选中 Read 类节点时，列表滚动到对应行。"""
+        try:
+            import sys
+            _mod = sys.modules[__name__]
+            _mod._sync_ticks = getattr(_mod, "_sync_ticks", 0) + 1  # 远程诊断计数器
+            sel = nuke.selectedNode()
+            name = sel.name() if sel else None
+            if name == self._last_sel:
+                return
+            self._last_sel = name
+            if not sel or sel.Class() not in READ_CLASSES:
+                return
+            for row in range(self.table.rowCount()):
+                if self.table.item(row, 0).text() == name:
+                    self.table.selectRow(row)
+                    self.table.scrollToItem(self.table.item(row, 0),
+                                            QtWidgets.QAbstractItemView.PositionAtCenter)
+                    break
+        except Exception:
+            pass
 
     # ---------- search panel ----------
 
@@ -538,7 +608,7 @@ class ReadManagerTable(QtWidgets.QDialog):
         QtWidgets.QMessageBox.information(self, "Read Manager", "Relinked " + str(count) + " node(s)")
         self._refresh()
 
-    def _replace_path(self):
+    def _replace_path(self, move=False):
         rows = self._selected_rows()
         if not rows:
             QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
@@ -563,7 +633,8 @@ class ReadManagerTable(QtWidgets.QDialog):
                 return
             seen[np] = op
             entries.append((row, op, np))
-        progress = QtWidgets.QProgressDialog("Copying files...", "Cancel", 0, len(entries), self)
+        verb = "Moving" if move else "Copying"
+        progress = QtWidgets.QProgressDialog(verb + " files...", "Cancel", 0, len(entries), self)
         progress.setWindowTitle("Read Manager")
         progress.setWindowModality(QtCore.Qt.WindowModal)
         progress.setMinimumDuration(500)
@@ -577,9 +648,36 @@ class ReadManagerTable(QtWidgets.QDialog):
             try:
                 src_dir = os.path.dirname(op)
                 dst_dir = os.path.dirname(np)
-                if dst_dir and not os.path.isdir(dst_dir):
-                    os.makedirs(dst_dir)
-                shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+                if move:
+                    # 只移动与该节点匹配的文件（stem + 帧序列），目录里其他文件不碰
+                    src_dir = os.path.dirname(_resolve_path(op))
+                    stem, ext = _stem_ext_from_path(op)
+                    pat = re.compile(r"^" + re.escape(stem) + r"(\.\d+)?\." + re.escape(ext) + r"$",
+                                     re.IGNORECASE)
+                    moved_any = False
+                    if os.path.isdir(src_dir):
+                        os.makedirs(dst_dir, exist_ok=True)
+                        for f in os.listdir(src_dir):
+                            if pat.match(f):
+                                sf = os.path.join(src_dir, f)
+                                df = os.path.join(dst_dir, f)
+                                if os.path.exists(df):
+                                    os.remove(df)
+                                shutil.move(sf, df)
+                                moved_any = True
+                        # 源目录已空则删除（只删空目录，不递归）
+                        try:
+                            if not os.listdir(src_dir):
+                                os.rmdir(src_dir)
+                        except OSError:
+                            pass
+                    if not moved_any:
+                        errors.append("no files matched in " + src_dir)
+                        continue  # 无文件可移，不更新节点
+                else:
+                    if dst_dir and not os.path.isdir(dst_dir):
+                        os.makedirs(dst_dir)
+                    shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
                 name = self.table.item(row, 0).text()
                 node = nuke.toNode(name)
                 if node:
@@ -597,6 +695,38 @@ class ReadManagerTable(QtWidgets.QDialog):
         if errors: msg += " | Errors: " + "; ".join(errors)
         QtWidgets.QMessageBox.information(self, "Read Manager", msg)
         self._refresh()
+
+    def _is_sequence_path(self, p):
+        return bool(re.search(r"\.(%0?\d*d|#+|\$F\d*|\d+)\.", p))
+
+    def _open_in_explorer(self):
+        rows = self._selected_rows()
+        if not rows:
+            QtWidgets.QMessageBox.information(self, "Read Manager", "Please select rows first")
+            return
+        opened = 0
+        for row in rows:
+            p = _resolve_path(self.table.item(row, 3).text())
+            if not p:
+                continue
+            if self._is_sequence_path(p):
+                # 序列文件 → 打开所在目录
+                d = os.path.dirname(p)
+                if os.path.isdir(d):
+                    os.startfile(d)
+                    opened += 1
+            else:
+                if os.path.isfile(p):
+                    # 单文件 → 资源管理器定位
+                    subprocess.Popen(["explorer", "/select," + p])
+                    opened += 1
+                else:
+                    d = os.path.dirname(p)
+                    if os.path.isdir(d):
+                        os.startfile(d)
+                        opened += 1
+        if not opened:
+            QtWidgets.QMessageBox.warning(self, "Read Manager", "No existing file/directory to open")
 
     def _to_relative(self):
         rows = self._selected_rows()
